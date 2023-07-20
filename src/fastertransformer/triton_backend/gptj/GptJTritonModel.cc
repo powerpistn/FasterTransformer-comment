@@ -22,21 +22,26 @@
 
 namespace ft = fastertransformer;
 
+//解析配置文件inifile并创建一个 GptJTritonModel 的实例，并返回一个指向 AbstractTransformerModel 类型的 shared_ptr 智能指针
+// 在函数的实现中，根据 data_type 的值（"fp16"、"fp32" 或者 "bf16"），它会通过 std::make_shared 创建不同数据类型（half、float 或者 __nv_bfloat16）的 
+// GptJTritonModel 对象，并将该对象包装在一个 std::shared_ptr<AbstractTransformerModel> 智能指针中。然后，将这个智能指针作为返回值，由调用者获取和管理这个对象的生命周期。
 std::shared_ptr<AbstractTransformerModel> AbstractTransformerModel::createGptJModel(std::string inifile)
 {
+    // 1.解析inifile文件
     INIReader reader = INIReader(inifile);
     if (reader.ParseError() < 0) {
         std::cout << "[ERROR] Can't load '" << inifile << "'\n";
         return nullptr;
     }
 
+    // 2.从配置文件里获取相关参数
     const std::string model_name       = reader.Get("ft_instance_hyperparameter", "model_name");
     const std::string data_type        = reader.Get("ft_instance_hyperparameter", "data_type");
     int               tensor_para_size = reader.GetInteger("ft_instance_hyperparameter", "tensor_para_size");
     std::string       model_dir        = reader.Get("ft_instance_hyperparameter", "model_dir");
     model_dir                          = model_dir + "/" + std::to_string(tensor_para_size) + "-gpu/";
 
-    // Prompt Learning Configurations
+    // 3.获取前缀学习的相关配置
     int end_id                   = reader.GetInteger(model_name, "end_id");
     int prompt_learning_start_id = reader.GetInteger(model_name, "prompt_learning_start_id", end_id + 1);
     ft::PromptLearningType prompt_learning_type =
@@ -44,7 +49,7 @@ std::shared_ptr<AbstractTransformerModel> AbstractTransformerModel::createGptJMo
 
     std::map<std::string, std::pair<int, int>> prompt_learning_table_pair;
 
-    // NOTE: get prompt from configuration files
+    // 4.获取前缀学习任务相关的配置
     const int num_tasks = reader.GetInteger(model_name, "num_tasks", 0);
     for (int task_name_id = 0; task_name_id < num_tasks; task_name_id++) {
         std::string config_task_name = model_name + "_task_" + std::to_string(task_name_id);
@@ -53,6 +58,7 @@ std::shared_ptr<AbstractTransformerModel> AbstractTransformerModel::createGptJMo
         prompt_learning_table_pair.insert({task_name, {task_name_id, prompt_length}});
     }
 
+    // 5.根据数据类型，使用相应的模板参数实例化GptJTritonModel
     if (data_type == "fp16") {
         return std::make_shared<GptJTritonModel<half>>(
             reader.GetInteger("ft_instance_hyperparameter", "max_seq_len"),
@@ -116,6 +122,7 @@ std::shared_ptr<AbstractTransformerModel> AbstractTransformerModel::createGptJMo
     }
 #endif
     else {
+        // 否则给出错误信息并退出程序
         FT_LOG_ERROR("Unsupported data type " + data_type);
         exit(-1);
     }
@@ -224,6 +231,7 @@ GptJTritonModel<T>::GptJTritonModel(size_t                                     m
 {
 }
 
+// 创建特定类型(模板参数T)的GptJ模型实例，并未该实例分配所需资源
 template<typename T>
 std::unique_ptr<AbstractTransformerModelInstance>
 GptJTritonModel<T>::createModelInstance(int                                                               device_id,
@@ -232,29 +240,34 @@ GptJTritonModel<T>::createModelInstance(int                                     
                                         std::pair<std::vector<ft::NcclParam>, std::vector<ft::NcclParam>> nccl_params,
                                         std::shared_ptr<ft::AbstractCustomComm> custom_all_reduce_comm)
 {
+    // 1.设置当前cuda设备为指定的device_id
     ft::check_cuda_error(cudaSetDevice(device_id));
+    // 2.根据'tensor_para_size_'和'pipeline_para_size_'计算当前设备的'comms_rank'
     const int comms_rank = device_id % (tensor_para_size_ * pipeline_para_size_);
 
+    // 3.为当前设备创建一个CUDA内存分配器，并将其流设置为'stream'
     std::unique_ptr<ft::Allocator<ft::AllocatorType::CUDA>> allocator(
         new ft::Allocator<ft::AllocatorType::CUDA>(device_id));
-
     allocator->setStream(stream);
 
+    // 4.创建Cublas和CublasLt库的CUDA句柄，并将其流设置为'stream'
     cublasHandle_t   cublas_handle;
     cublasLtHandle_t cublaslt_handle;
-
     cublasCreate(&cublas_handle);
     cublasLtCreate(&cublaslt_handle);
     cublasSetStream(cublas_handle, stream);
-
+    
+    // 5.创建cublasAlgoMap，将Cublas算法映射到GEMM配置
     std::unique_ptr<ft::cublasAlgoMap>   cublas_algo_map(new ft::cublasAlgoMap("gemm_config.in"));
+    // 6.创建Cublas封装器的互斥锁
     std::unique_ptr<std::mutex>          cublas_wrapper_mutex(new std::mutex());
+    // 7.创建cublasMMWrapper用于处理Cublas矩阵乘法
     std::unique_ptr<ft::cublasMMWrapper> cublas_wrapper(new ft::cublasMMWrapper(
         cublas_handle, cublaslt_handle, stream, cublas_algo_map.get(), cublas_wrapper_mutex.get(), allocator.get()));
-
+    // 8.创建CUDA设备属性对象，以获取设备属性
     std::unique_ptr<cudaDeviceProp> cuda_device_prop_ptr(new cudaDeviceProp);
     ft::check_cuda_error(cudaGetDeviceProperties(cuda_device_prop_ptr.get(), device_id));
-
+    // 9.根据数据类型'T'确定GEMM配置
     if (std::is_same<T, half>::value) {
         cublas_wrapper->setGemmConfig(CUDA_R_16F, CUDA_R_16F, CUDA_R_16F, CUDA_R_32F);
     }
@@ -266,10 +279,10 @@ GptJTritonModel<T>::createModelInstance(int                                     
     else if (std::is_same<T, float>::value) {
         cublas_wrapper->setFP32GemmConfig();
     }
-
+    // 10.获取当前设备的张量并行和管道并行参数
     ft::NcclParam tensor_para   = nccl_params.first[comms_rank];
     ft::NcclParam pipeline_para = nccl_params.second[comms_rank];
-
+    // 11.根据'size_per_head_'、'ft::getSMVersion()'和其他参数确定注意力类型
     ft::AttentionType attention_type = ft::getAttentionType<T>(size_per_head_,
                                                                ft::getSMVersion(),
                                                                true,   // remove_padding
@@ -277,7 +290,7 @@ GptJTritonModel<T>::createModelInstance(int                                     
                                                                true,   // is_fuse
                                                                false,  // with_relative_position_bias
                                                                true);  // causal_mask
-
+    // 12.创建GptJ模型的实例，并使用指定的配置
     auto gpt =
         std::make_unique<ft::GptJ<T>>(ft::GptJ<T>(0,  // max_batch_size, FT will adjust the buffer automatically.
                                                   0,  // max_seq_len, FT will adjust the buffer automatically.
@@ -310,7 +323,7 @@ GptJTritonModel<T>::createModelInstance(int                                     
                                                   attention_type,
                                                   custom_all_reduce_comm,
                                                   enable_custom_all_reduce_));
-
+    // 13.创建并返回GptJTritonModelInstance<T>的实例，其中包含创建的GptJ模型和其他资源
     return std::unique_ptr<GptJTritonModelInstance<T>>(new GptJTritonModelInstance<T>(std::move(gpt),
                                                                                       shared_weights_[device_id],
                                                                                       std::move(allocator),
@@ -323,9 +336,11 @@ GptJTritonModel<T>::createModelInstance(int                                     
 template<typename T>
 void GptJTritonModel<T>::createSharedWeights(int device_id, int rank)
 {
+    // 1.设置当前设备为指定设备,计算当前rank对应的tensor分布的rank,计算当前rank对应的pipeline分布的rank
     ft::check_cuda_error(cudaSetDevice(device_id));
     const int tensor_para_rank   = rank % tensor_para_size_;
     const int pipeline_para_rank = rank / tensor_para_size_;
+    // 2.使用std::make_shared创建一个GptJWeight对象，并将其指针存储在shared_weights_数组中
     shared_weights_[device_id]   = std::make_shared<ft::GptJWeight<T>>(head_num_ * size_per_head_,
                                                                      inter_size_,
                                                                      vocab_size_,
@@ -337,10 +352,12 @@ void GptJTritonModel<T>::createSharedWeights(int device_id, int rank)
                                                                      pipeline_para_rank,
                                                                      prompt_learning_type_,
                                                                      prompt_learning_table_pair_);
+    // 3.加载GptJWeight对象的模型数据
     shared_weights_[device_id]->loadModel(model_dir_);
     return;
 }
 
+// 将GptJTritonModel对象的信息转换成一个字符串，并以该字符串的形式返回。函数使用std::stringstream将不同的属性值连接成一个字符串，然后通过ss.str()返回该字符串。
 template<typename T>
 std::string GptJTritonModel<T>::toString()
 {
@@ -354,6 +371,8 @@ std::string GptJTritonModel<T>::toString()
     return ss.str();
 }
 
+// 创建自定义的通信组，以用于自定义的AllReduce操作。根据模板参数T，通过ft::CustomARCommTypeConverter<T>获取对应的通信数据类型commDataType，
+// 然后通过ft::initCustomAllReduceComm<commDataType>创建自定义的通信组。
 template<typename T>
 void GptJTritonModel<T>::createCustomComms(
     std::vector<std::shared_ptr<ft::AbstractCustomComm>>* custom_all_reduce_comms, int world_size)
@@ -362,18 +381,22 @@ void GptJTritonModel<T>::createCustomComms(
     ft::initCustomAllReduceComm<commDataType>(custom_all_reduce_comms, enable_custom_all_reduce_, world_size);
 }
 
+// 获取tensor大小
 template<typename T>
 int GptJTritonModel<T>::getTensorParaSize()
 {
     return tensor_para_size_;
 }
 
+// 获取管道并行大小
 template<typename T>
 int GptJTritonModel<T>::getPipelineParaSize()
 {
     return pipeline_para_size_;
 }
 
+/// 这部分代码是对GptJTritonModel类进行实例化，即实例化了具体的模板类。通过这种方式，在编译时生成了float、half和__nv_bfloat16三种不同
+// 数据类型的GptJTritonModel类的定义。这样，在其他地方可以直接使用这些数据类型来实例化GptJTritonModel对象。
 template struct GptJTritonModel<float>;
 template struct GptJTritonModel<half>;
 #ifdef ENABLE_BF16

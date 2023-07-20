@@ -263,6 +263,14 @@ using triton_stream_cb_t = void(std::shared_ptr<std::unordered_map<std::string, 
 struct AbstractTransformerModel;
 struct AbstractTransformerModelInstance;
 
+// forward():纯虚函数，进行前向推理。接受std::shared_ptr<std::vector<triton::Tensor>> 类型的输入张量指针 input_tensors，
+// 返回std::shared_ptr<std::vector<triton::Tensor>> 类型的输出张量指针。这个函数没有实现，因为它被声明为纯虚函数（= 0），所以需要在派生类中实现。
+// forward():纯虚函数，进行前向推理。接受std::shared_ptr<std::unordered_map<std::string, triton::Tensor>> 类型的输入张量字典指针 input_tensors，
+// 返回std::shared_ptr<std::unordered_map<std::string, triton::Tensor>> 类型的输出张量字典指针。与前一个函数类似，这个函数也是纯虚函数，需要在派生类中实现。
+// registerCallback():成员函数，用于注册回调函数。接受 triton_stream_cb_t* 类型的回调函数指针 cb 和 void* 类型的上下文指针 ctx，并将其保存在结构体的成员变量 stream_cb_ 和 stream_ctx_ 中。
+// unRegisterCallback(): 成员函数，用于取消注册回调函数。它将结构体的成员变量 stream_cb_ 和 stream_ctx_ 设置为 nullptr，表示没有注册回调函数
+// stream_cb_ : 成员变量，表示回调函数的指针。默认为 nullptr，表示没有注册回调函数。
+// stream_ctx_ :成员变量，表示回调函数的上下文指针。默认为 nullptr，表示没有注册回调函数时没有上下文信息
 struct AbstractTransformerModelInstance {
     virtual std::shared_ptr<std::vector<triton::Tensor>>
     forward(std::shared_ptr<std::vector<triton::Tensor>> input_tensors) = 0;

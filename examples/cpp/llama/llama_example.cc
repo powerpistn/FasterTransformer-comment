@@ -105,7 +105,7 @@ void llama_example(const INIReader reader)
     const float  beam_search_diversity_rate = reader.GetFloat("request", "beam_search_diversity_rate");
     const int    min_length                 = reader.GetInteger("request", "min_length", 0);
     const size_t request_batch_size         = 1; // reader.GetInteger("request", "request_batch_size");
-    // The length of tokens we hope this model to generate
+    // 设置希望模型生成的token长度
     const int request_output_len = reader.GetInteger("request", "request_output_len");
 
     FT_CHECK(head_num % tensor_para_size == 0);
@@ -118,7 +118,7 @@ void llama_example(const INIReader reader)
                repetition_penalty,
                presence_penalty));
 
-    // Prepare the parallelism parameters
+    // 准备并行参数
     int rank       = mpi::getCommWorldRank();
     int world_size = mpi::getCommWorldSize();
     if (rank == 0) {

@@ -31,28 +31,28 @@ template<typename T>
 class GptJ: public BaseLayer {
 private:
     // meta data
-    size_t     head_num_;
-    size_t     size_per_head_;
-    size_t     inter_size_;
-    size_t     num_layer_;
-    size_t     vocab_size_;
-    size_t     rotary_embedding_dim_;
-    const bool neox_rotary_style_ = false;  // A unify way for GPT-NeoX in the future, not used now.
+    size_t     head_num_;//注意力头数
+    size_t     size_per_head_;//每个头的大小，用于注意力机制中每个头的向量维度。
+    size_t     inter_size_;//模型中间层的维度大小。
+    size_t     num_layer_;//模型的层数
+    size_t     vocab_size_;//词汇表的大小，表示模型能够处理的不同词汇数量。
+    size_t     rotary_embedding_dim_;//旋转嵌入层的维度大小，用于某些变种的注意力计算。
+    const bool neox_rotary_style_ = false;  //GPT-NeoX中使用的旋转嵌入风格 A unify way for GPT-NeoX in the future, not used now.
 
-    static constexpr float layernorm_eps_ = 1e-6f;
+    static constexpr float layernorm_eps_ = 1e-6f;//层归一化操作的epsilon值
 
-    int    start_id_;
-    int    end_id_;
-    size_t hidden_units_;
+    int    start_id_;//特殊标记的起始id值，用于序列生成任务的起始标记
+    int    end_id_;//特殊标记的结束id值，用于序列生成任务的结束标记
+    size_t hidden_units_;//模型隐藏层的维度大小
 
-    size_t    local_head_num_;
-    NcclParam tensor_para_;
-    NcclParam pipeline_para_;
+    size_t    local_head_num_;//本地头数，用于并行计算中的分布式处理。
+    NcclParam tensor_para_;//用于张量并行计算的参数
+    NcclParam pipeline_para_;//用于管道并行计算的参数
 
-    std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm_;
-    int                                 enable_custom_all_reduce_;
+    std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm_;//自定义的全局归约通信
+    int                                 enable_custom_all_reduce_;//是否启用自定义全局归约通信
 
-    AttentionType attention_type_;
+    AttentionType attention_type_;//模型的注意力机制类型，如融合的多头注意力等。
 
     size_t     vocab_size_padded_;
     const bool is_context_qk_buf_float_ =
